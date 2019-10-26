@@ -27,6 +27,17 @@ class socket_gate:public gate{
 		sb.prepare(num);
 		boost::asio::read(sock, sb, boost::asio::transfer_exactly(num));
 	}
+	int str_to_int(const std::string &str){
+		int data=0;
+		memcpy(&data, &str[0], 4);
+		return std::move(data);
+	}
+	std::string int_to_str(int i){
+		std::string data;
+		data.resize(4);
+		memcpy(&data[0], &i, 4);
+		return std::move(data);
+	}
 public:
 	socket_gate(const std::string &path)
 		:gate(),
@@ -34,15 +45,20 @@ public:
 		ep(path)
 	{}
 
-	~socket_gate(){}
+	~socket_gate(){
+		sock.close();
+	}
 	void host()override{
 		sock.connect(ep);
 	}
 	std::vector<uint8_t> get()override{
 		boost::asio::streambuf sb;
 		get_bytes(sb, 4);
-		auto data = sb_to_str(&sb);
-		size_t length = std::stoul(std::move(data));
+		int length = str_to_int(
+			std::string(boost::asio::buffers_begin(sb.data()),
+				boost::asio::buffers_end(sb.data()))
+		);
+		std::cout<<"getting "<<length<<" bytes\n";
 		sb.consume(4);
 		get_bytes(sb, length);
 		auto sb_data = sb.data();
@@ -50,14 +66,30 @@ public:
 			boost::asio::buffers_end(sb_data));
 	}
 	void send(const std::vector<uint8_t> &data)override{
-
+		auto len = int_to_str((int)data.size());
+		std::cout<<"sending "<<data.size()<<" bytes\n";
+		std::string data_str(data.begin(), data.end());
+		boost::asio::write(sock, boost::asio::buffer(len));
+		boost::asio::write(sock, boost::asio::buffer(data_str));
 	}
 };
 
-int main(){
+int main(int argc, char*argv[]){
+	size_t num = 10;
+	if(argc > 1){
+		num = std::atoi(argv[1]);
+	}
 	const std::string path = "/tmp/sock";
-	std::unique_ptr<gate> gt = std::make_unique<socket_gate>(path);
-	gt->host();
-	auto data = gt->get();
-	std::copy(data.begin(), data.end(), std::ostream_iterator<int>(std::cout, " "));
+	while(num>0){
+		try{
+			std::unique_ptr<gate> gt = std::make_unique<socket_gate>(path);
+			gt->host();
+			auto data = gt->get();
+			std::cout << "data: " <<data.size()<<" bytes\n";
+			gt->send(data);
+			num--;
+		}catch(...){
+			//std::cerr<<"WARNING, a error occured\n";
+		}
+	}
 }
